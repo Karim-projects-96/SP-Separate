@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FormExtract Pro - AI Photo & Signature Separator Studio</title>
+    <meta name="description" content="Effortlessly separate, extract, auto-enhance, and format photos and signatures from application forms, PDFs, and IDs with official exam portal presets.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- PDF.js for Client-Side In-Browser PDF Rendering (Netlify & Offline Ready) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
+    <!-- JSZip for Client-Side ZIP Archive Generation (Netlify & Offline Ready) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body class="dark-theme">
+    <!-- Master File Inputs (top level so they never get blocked by container display:none or bubbling) -->
+    <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.tiff,.heic,.heif,application/pdf,image/*" class="file-input-hidden">
+    <input type="file" id="batchFileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.tiff,.heic,.heif,application/pdf,image/*" class="file-input-hidden">
+
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="logo-container">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor"/>
+                        <circle cx="8.5" cy="8.5" r="2.5" fill="currentColor"/>
+                        <path d="M21 15l-5-5L5 21"/>
+                        <path d="M14 18l2-2 3 3" stroke-width="2.5"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>FormExtract <span class="badge-pro">PRO</span></h1>
+                    <span class="logo-subtitle">AI Photo & Signature Separation Studio</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="header-center">
+            <!-- Preset Selector -->
+            <div class="preset-widget">
+                <label for="portalPresetSelect" class="widget-label">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                    Portal Preset:
+                </label>
+                <select id="portalPresetSelect" class="preset-select">
+                    <option value="custom">Custom / Adaptive</option>
+                    <option value="ssc">SSC (200x230 photo, 140x60 sign)</option>
+                    <option value="upsc">UPSC (350x350 photo & sign)</option>
+                    <option value="ibps">IBPS Bank Exam (20-50KB & 10-20KB)</option>
+                    <option value="passport_visa">Passport / Visa (600x600 px)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <!-- 1-Click Sample Form Loader -->
+            <button id="btnLoadSample" class="btn-secondary" title="Test immediately with a realistic application form">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+                <span>Load Sample Form</span>
+            </button>
+
+            <!-- Batch Mode Trigger -->
+            <button id="btnOpenBatch" class="btn-ghost" title="Batch extract multiple forms at once">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="7" width="16" height="14" rx="2"></rect>
+                    <path d="M6 3h12a2 2 0 0 1 2 2v12"></path>
+                </svg>
+                <span>Batch Mode</span>
+            </button>
+    </header>
+
+    <!-- Server Offline Warning Banner (shown if backend server is not running) -->
+    <div id="serverOfflineBanner" class="server-offline-banner hidden">
+        <div class="banner-content">
+            <span class="banner-text">⚠️ <strong>Backend Server Disconnected:</strong> Cannot reach AI engine on <code>http://127.0.0.1:8000</code>. Please double-click <code>run_tool.bat</code> or run <code>python server.py</code> to process documents.</span>
+            <button id="btnRetryServer" class="btn-banner-retry">Retry Connection</button>
+        </div>
+    </div>
+
+    <!-- Main Workspace Container -->
+    <main class="workspace-container">
+        <!-- Center Document Stage -->
+        <section class="document-stage">
+            <!-- Stage Toolbar (shown when document loaded) -->
+            <div id="stageToolbar" class="stage-toolbar hidden">
+                <div class="toolbar-group">
+                    <button id="btnToolDrawPhoto" class="tool-btn" title="Click and drag to define new Photo area">
+                        <span class="tool-dot dot-photo"></span>
+                        <span>Draw Photo Box</span>
+                    </button>
+                    <button id="btnToolDrawSig" class="tool-btn" title="Click and drag to define new Signature area">
+                        <span class="tool-dot dot-sig"></span>
+                        <span>Draw Signature Box</span>
+                    </button>
+                    <button id="btnAutoDetect" class="tool-btn" title="Re-run AI auto-detection">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                        </svg>
+                        <span>Auto-Detect</span>
+                    </button>
+                </div>
+
+                <div class="toolbar-group stage-view-controls">
+                    <!-- PDF Pagination if multi-page -->
+                    <div id="pdfPagination" class="pdf-pages hidden">
+                        <button id="btnPrevPage" class="icon-btn" title="Previous Page">‹</button>
+                        <span id="pageIndicator">Page 1 / 1</span>
+                        <button id="btnNextPage" class="icon-btn" title="Next Page">›</button>
+                    </div>
+
+                    <button id="btnZoomIn" class="icon-btn" title="Zoom In">+</button>
+                    <span id="zoomLevelText" class="zoom-text">100%</span>
+                    <button id="btnZoomOut" class="icon-btn" title="Zoom Out">-</button>
+                    <button id="btnFitScreen" class="icon-btn" title="Fit to Screen">⛶</button>
+                    <button id="btnResetView" class="icon-btn" title="Reset View">↺</button>
+                </div>
+            </div>
+
+            <!-- Upload Dropzone (when no document active) -->
+            <div id="uploadDropzone" class="upload-dropzone">
+                <div class="dropzone-glow"></div>
+                <div class="dropzone-content">
+                    <div class="dropzone-icon-pulse">
+                        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.6">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="12" y1="18" x2="12" y2="12"></line>
+                            <polyline points="9 15 12 12 15 15"></polyline>
+                        </svg>
+                    </div>
+                    <h2>Drop your Form or Document here</h2>
+                    <p class="dropzone-subtext">Supports PDF application forms, scanned forms, photos (PNG, JPG, WEBP)</p>
+                    
+                    <div class="dropzone-buttons">
+                        <button id="btnBrowseFiles" class="btn-primary">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <span>Browse Document</span>
+                        </button>
+                        <span class="or-separator">or</span>
+                        <button id="btnDropzoneSample" class="btn-outline">
+                            <span>Try Demo Form</span>
+                        </button>
+                    </div>
+
+                    <div class="feature-pills">
+                        <span class="feat-pill">⚡ YuNet Neural Face Detect</span>
+                        <span class="feat-pill">✍️ Handwritten Stroke Isolator</span>
+                        <span class="feat-pill">🔍 Interactive Bounding Box Fine-Tuning</span>
+                        <span class="feat-pill">📦 Target KB Compressor</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canvas Viewport for active document -->
+            <div id="viewportContainer" class="viewport-container hidden">
+                <div id="canvasWrapper" class="canvas-wrapper">
+                    <!-- Base Document Image -->
+                    <img id="docImage" class="doc-image" alt="Uploaded Document" draggable="false">
+                    
+                    <!-- SVG Overlay for interactive bounding boxes -->
+                    <svg id="boxOverlay" class="box-overlay" preserveAspectRatio="none">
+                        <!-- Photo Box Group -->
+                        <g id="photoBoxGroup" class="box-group group-photo">
+                            <rect id="photoRect" class="selection-rect rect-photo"></rect>
+                            <text id="photoLabel" class="box-label label-photo" x="0" y="0">Photo</text>
+                            <!-- 8 Resize Handles -->
+                            <circle class="handle handle-tl" data-handle="tl" r="6"></circle>
+                            <circle class="handle handle-tr" data-handle="tr" r="6"></circle>
+                            <circle class="handle handle-bl" data-handle="bl" r="6"></circle>
+                            <circle class="handle handle-br" data-handle="br" r="6"></circle>
+                            <circle class="handle handle-mt" data-handle="mt" r="5"></circle>
+                            <circle class="handle handle-mr" data-handle="mr" r="5"></circle>
+                            <circle class="handle handle-mb" data-handle="mb" r="5"></circle>
+                            <circle class="handle handle-ml" data-handle="ml" r="5"></circle>
+                        </g>
+
+                        <!-- Signature Box Group -->
+                        <g id="sigBoxGroup" class="box-group group-sig">
+                            <rect id="sigRect" class="selection-rect rect-sig"></rect>
+                            <text id="sigLabel" class="box-label label-sig" x="0" y="0">Signature</text>
+                            <!-- 8 Resize Handles -->
+                            <circle class="handle handle-tl" data-handle="tl" r="6"></circle>
+                            <circle class="handle handle-tr" data-handle="tr" r="6"></circle>
+                            <circle class="handle handle-bl" data-handle="bl" r="6"></circle>
+                            <circle class="handle handle-br" data-handle="br" r="6"></circle>
+                            <circle class="handle handle-mt" data-handle="mt" r="5"></circle>
+                            <circle class="handle handle-mr" data-handle="mr" r="5"></circle>
+                            <circle class="handle handle-mb" data-handle="mb" r="5"></circle>
+                            <circle class="handle handle-ml" data-handle="ml" r="5"></circle>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Floating Stage Status Indicator -->
+            <div id="stageStatus" class="stage-status hidden">
+                <span class="status-indicator-dot"></span>
+                <span id="statusMessage">Document Loaded</span>
+            </div>
+        </section>
+
+        <!-- Right Side: Separation & Export Control Panel -->
+        <aside class="control-panel">
+            <div class="panel-header">
+                <h2>Separation Studio</h2>
+                <button id="btnReupload" class="link-btn" title="Upload another form">New Form</button>
+            </div>
+
+            <div class="panel-scroll-content">
+                <!-- 1. PHOTO EXTRACTION CARD -->
+                <div class="card-section">
+                    <div class="card-title-bar">
+                        <div class="title-with-tag">
+                            <span class="card-badge badge-photo">PHOTO</span>
+                            <span id="photoConfidenceBadge" class="confidence-tag">Auto: 98%</span>
+                        </div>
+                    </div>
+
+                    <!-- Photo Preview Box -->
+                    <div class="preview-box photo-preview-box">
+                        <img id="photoPreviewImg" alt="Cropped Photo Preview" class="preview-img">
+                        <div id="photoSkeleton" class="skeleton-shimmer"></div>
+                    </div>
+
+                    <!-- Photo Metrics Badges -->
+                    <div class="metrics-row">
+                        <div class="metric-item">
+                            <span class="metric-label">Dimensions</span>
+                            <span id="photoDimText" class="metric-val">-- x -- px</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">File Size</span>
+                            <span id="photoKbText" class="metric-val metric-highlight">-- KB</span>
+                        </div>
+                    </div>
+
+                    <!-- Photo Adjustments Accordion / Controls -->
+                    <div class="controls-grid">
+                        <div class="control-field">
+                            <div class="label-with-val">
+                                <label for="photoWidthInput">Target Width (px)</label>
+                                <span id="photoWidthVal">Auto</span>
+                            </div>
+                            <input type="number" id="photoWidthInput" class="num-input" placeholder="e.g. 200">
+                        </div>
+                        <div class="control-field">
+                            <div class="label-with-val">
+                                <label for="photoHeightInput">Target Height (px)</label>
+                                <span id="photoHeightVal">Auto</span>
+                            </div>
+                            <input type="number" id="photoHeightInput" class="num-input" placeholder="e.g. 230">
+                        </div>
+                    </div>
+
+                    <!-- Photo Enhancement Sliders -->
+                    <div class="sliders-list">
+                        <div class="slider-field">
+                            <div class="label-with-val">
+                                <label for="photoBrightnessSlider">Brightness</label>
+                                <span id="photoBrightnessVal">0%</span>
+                            </div>
+                            <input type="range" id="photoBrightnessSlider" min="0.7" max="1.4" step="0.05" value="1.0" class="slider-input">
+                        </div>
+
+                        <div class="slider-field">
+                            <div class="label-with-val">
+                                <label for="photoContrastSlider">Contrast</label>
+                                <span id="photoContrastVal">0%</span>
+                            </div>
+                            <input type="range" id="photoContrastSlider" min="0.7" max="1.4" step="0.05" value="1.0" class="slider-input">
+                        </div>
+
+                        <div class="slider-field">
+                            <div class="label-with-val">
+                                <label for="photoTargetKbSlider">Max File Size (Target KB)</label>
+                                <span id="photoTargetKbVal">50 KB</span>
+                            </div>
+                            <input type="range" id="photoTargetKbSlider" min="15" max="300" step="5" value="50" class="slider-input">
+                        </div>
+                    </div>
+
+                    <div class="toggle-row">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="photoBorderToggle">
+                            <span class="checkmark"></span>
+                            <span>Add 1px Standard Border</span>
+                        </label>
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="photoSharpenToggle" checked>
+                            <span class="checkmark"></span>
+                            <span>Auto-Sharpen</span>
+                        </label>
+                    </div>
+
+                    <!-- Single Download Button -->
+                    <button id="btnDownloadPhoto" class="btn-card-action">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span>Download Photo (JPG)</span>
+                    </button>
+                </div>
+
+                <!-- 2. SIGNATURE EXTRACTION CARD -->
+                <div class="card-section">
+                    <div class="card-title-bar">
+                        <div class="title-with-tag">
+                            <span class="card-badge badge-sig">SIGNATURE</span>
+                            <span id="sigConfidenceBadge" class="confidence-tag">Auto: 94%</span>
+                        </div>
+                    </div>
+
+                    <!-- Signature Preview Box with checkered transparency background -->
+                    <div class="preview-box sig-preview-box checkerboard-bg">
+                        <img id="sigPreviewImg" alt="Cropped Signature Preview" class="preview-img">
+                        <div id="sigSkeleton" class="skeleton-shimmer"></div>
+                    </div>
+
+                    <!-- Signature Metrics Badges -->
+                    <div class="metrics-row">
+                        <div class="metric-item">
+                            <span class="metric-label">Dimensions</span>
+                            <span id="sigDimText" class="metric-val">-- x -- px</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">File Size</span>
+                            <span id="sigKbText" class="metric-val metric-highlight">-- KB</span>
+                        </div>
+                    </div>
+
+                    <!-- Background Mode Pills -->
+                    <div class="control-field">
+                        <label class="field-heading">Background Cleanliness</label>
+                        <div class="segmented-control" id="sigModeTabs">
+                            <button class="seg-btn active" data-mode="clean_white">Clean White</button>
+                            <button class="seg-btn" data-mode="transparent">Transparent PNG</button>
+                            <button class="seg-btn" data-mode="original">Original Paper</button>
+                        </div>
+                    </div>
+
+                    <!-- Ink Color Pills -->
+                    <div class="control-field">
+                        <label class="field-heading">Ink Style / Color</label>
+                        <div class="segmented-control" id="sigColorTabs">
+                            <button class="seg-btn active" data-color="original">Original Ink</button>
+                            <button class="seg-btn" data-color="black">Deep Black</button>
+                            <button class="seg-btn" data-color="blue">Royal Blue</button>
+                        </div>
+                    </div>
+
+                    <!-- Signature Threshold Slider -->
+                    <div class="sliders-list">
+                        <div class="slider-field">
+                            <div class="label-with-val">
+                                <label for="sigThresholdSlider">Background Noise Remover</label>
+                                <span id="sigThresholdVal">190</span>
+                            </div>
+                            <input type="range" id="sigThresholdSlider" min="130" max="235" step="2" value="190" class="slider-input">
+                        </div>
+
+                        <div class="slider-field">
+                            <div class="label-with-val">
+                                <label for="sigTargetKbSlider">Max File Size (Target KB)</label>
+                                <span id="sigTargetKbVal">20 KB</span>
+                            </div>
+                            <input type="range" id="sigTargetKbSlider" min="5" max="100" step="2" value="20" class="slider-input">
+                        </div>
+                    </div>
+
+                    <!-- Single Download Button -->
+                    <button id="btnDownloadSig" class="btn-card-action">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span>Download Signature (<span id="sigFormatLabel">JPG</span>)</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Bottom Grand Action: Export Both as ZIP Bundle -->
+            <div class="panel-footer">
+                <button id="btnDownloadZip" class="btn-bundle-download">
+                    <div class="bundle-btn-glow"></div>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                    </svg>
+                    <div class="bundle-text">
+                        <span class="btn-main-text">Download Both (ZIP Bundle)</span>
+                        <span class="btn-sub-text">Includes formatted Photo & Signature</span>
+                    </div>
+                </button>
+            </div>
+        </aside>
+    </main>
+
+    <!-- BATCH PROCESSING MODAL -->
+    <div id="batchModal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title-with-icon">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="7" width="16" height="14" rx="2"></rect>
+                        <path d="M6 3h12a2 2 0 0 1 2 2v12"></path>
+                    </svg>
+                    <h3>Batch Form Separator</h3>
+                </div>
+                <button id="btnCloseBatchModal" class="icon-btn-close">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <p class="modal-intro">Upload multiple forms (PDFs or images). The AI will process and extract photos and signatures from each document automatically in bulk.</p>
+                
+                <div id="batchDropzone" class="batch-dropzone">
+                    <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <p>Drag & Drop multiple forms here, or <span class="highlight-link">Browse files</span></p>
+                    <span id="batchCountBadge" class="file-count-badge hidden">0 files selected</span>
+                </div>
+
+                <!-- Batch Progress Bar -->
+                <div id="batchProgressContainer" class="progress-bar-container hidden">
+                    <div class="progress-info">
+                        <span id="batchStatusText">Processing documents...</span>
+                        <span id="batchProgressPercent">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div id="batchProgressBar" class="progress-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Batch Results Gallery -->
+                <div id="batchGallery" class="batch-gallery hidden"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button id="btnCancelBatch" class="btn-ghost">Cancel</button>
+                <button id="btnStartBatch" class="btn-primary" disabled>
+                    <span>Extract All Selected Forms</span>
+                </button>
+                <button id="btnDownloadBatchZip" class="btn-primary hidden">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>Download Complete Batch (ZIP)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toastNotification" class="toast-notification hidden">
+        <span id="toastIcon">✓</span>
+        <span id="toastMessage">Action completed</span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
